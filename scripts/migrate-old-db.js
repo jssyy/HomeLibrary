@@ -3,7 +3,7 @@
  *
  *   node scripts/migrate-old-db.js [旧库路径] [--covers]
  *
- * 旧库里 reading_progress 是 "爸爸已读|妈妈待读|凡凡待读" 这样的拼接字符串，
+ * 旧库里 reading_progress 是 "成员A已读|成员B在读|成员C待读" 这样的拼接字符串，
  * 这里拆成每位成员一条阅读记录。加 --covers 会把封面下载到本地（要能连上图片站）。
  */
 const fs = require('fs');
@@ -26,7 +26,7 @@ const oldPath =
 const STATUSES = ['待读', '在读', '已读', '弃读'];
 
 function parseProgress(raw) {
-  // "爸爸已读|妈妈待读|凡凡待读" -> [{name:'爸爸', status:'已读'}, ...]
+  // "成员A已读|成员B在读" -> [{name:'成员A', status:'已读'}, ...]
   const out = [];
   for (const part of String(raw || '').split('|')) {
     const p = part.trim();
@@ -50,7 +50,7 @@ function tsToDate(v) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** 老库里的成员名对应到新库；默认成员没用过就直接改名，避免出现「宝宝」和「凡凡」两份 */
+/** 老库里的成员名对应到新库：默认成员还没用过就直接改名，免得留下一个空壳成员 */
 function resolveMember(name, usedNames) {
   const hit = db.prepare('SELECT * FROM members WHERE name = ?').get(name);
   if (hit) return hit.id;

@@ -142,13 +142,12 @@ function addColumn(table, column, definition) {
 // 套装书：整套共用一个 ISBN，每册书名不同，用这个字段区分第几册
 addColumn('books', 'volume', 'TEXT');
 
-// 首次运行时建立默认家庭成员
+// 首次运行时建一个成员，保证书籍至少有一条阅读记录可挂。
+// 家里其他人在「设置 › 家庭成员」里自己加，称呼和头像都能改。
 const memberCount = db.prepare('SELECT COUNT(*) AS c FROM members').get().c;
 if (memberCount === 0) {
-  const ins = db.prepare('INSERT INTO members (name, emoji, color, sort_order) VALUES (?,?,?,?)');
-  ins.run('爸爸', '👨', '#4f8cff', 1);
-  ins.run('妈妈', '👩', '#ff7ab6', 2);
-  ins.run('宝宝', '🧒', '#ffb648', 3);
+  db.prepare('INSERT INTO members (name, emoji, color, sort_order) VALUES (?,?,?,?)')
+    .run('我', '📖', '#4f8cff', 1);
 }
 
 /** 保证每本书对每个在册成员都有一条阅读记录 */
