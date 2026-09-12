@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#f7f3ec">
+<title>阅读</title>
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/css/reader.css">
+</head>
+<body class="theme-light">
+
+<div id="reader">
+  <header class="rd-bar rd-top" id="topBar">
+    <button class="rd-btn" id="btnBack" title="返回">‹</button>
+    <div class="rd-title ellip" id="rdTitle">加载中…</div>
+    <button class="rd-btn" id="btnToc" title="目录">☰</button>
+    <button class="rd-btn" id="btnSettings" title="阅读设置">Aa</button>
+  </header>
+
+  <div id="stage">
+    <div id="viewer"></div>
+    <div id="pdfScroll" hidden></div>
+    <div class="rd-loading" id="loading">正在打开…</div>
+    <div class="tap-zone left" id="tapPrev"></div>
+    <div class="tap-zone right" id="tapNext"></div>
+  </div>
+
+  <footer class="rd-bar rd-bottom" id="bottomBar">
+    <button class="rd-btn" id="btnPrev">‹</button>
+    <input type="range" id="progress" min="0" max="100" value="0">
+    <span class="rd-pct mono" id="pctText">0%</span>
+    <button class="rd-btn" id="btnNext">›</button>
+  </footer>
+
+  <!-- 目录 -->
+  <aside class="rd-panel" id="tocPanel" hidden>
+    <div class="rd-panel-head">
+      <span>目录</span>
+      <button class="rd-btn" data-close="tocPanel">×</button>
+    </div>
+    <div class="rd-panel-body" id="tocList"></div>
+  </aside>
+
+  <!-- 设置 -->
+  <aside class="rd-panel right" id="setPanel" hidden>
+    <div class="rd-panel-head">
+      <span>阅读设置</span>
+      <button class="rd-btn" data-close="setPanel">×</button>
+    </div>
+    <div class="rd-panel-body">
+      <div class="set-group">
+        <div class="set-label">谁在读</div>
+        <select id="memberSelect" class="set-select"></select>
+      </div>
+      <div class="set-group">
+        <div class="set-label">字号</div>
+        <div class="set-row">
+          <button class="set-btn" id="fontDown">A-</button>
+          <span id="fontSize" class="mono">100%</span>
+          <button class="set-btn" id="fontUp">A+</button>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-label">配色</div>
+        <div class="set-row">
+          <button class="set-btn theme-pick" data-theme="light">白</button>
+          <button class="set-btn theme-pick" data-theme="sepia">米</button>
+          <button class="set-btn theme-pick" data-theme="dark">夜</button>
+        </div>
+      </div>
+      <div class="set-group" id="flowGroup">
+        <div class="set-label">翻页方式</div>
+        <div class="set-row">
+          <button class="set-btn flow-pick" data-flow="paginated">翻页</button>
+          <button class="set-btn flow-pick" data-flow="scrolled-doc">滚动</button>
+        </div>
+      </div>
+      <div class="set-group">
+        <div class="set-label">笔记</div>
+        <div class="set-hint">选中正文里的句子，会弹出「存为笔记」。</div>
+        <a class="set-btn block" id="bookLink" href="#">回到书籍详情</a>
+      </div>
+    </div>
+  </aside>
+
+  <div class="rd-mask" id="mask" hidden></div>
+
+  <!-- 划词菜单 -->
+  <div class="sel-menu" id="selMenu" hidden>
+    <button id="selNote">存为笔记</button>
+    <button id="selCopy">复制</button>
+  </div>
+</div>
+
+<script src="/vendor/jszip.min.js"></script>
+<script src="/vendor/epub.min.js"></script>
+<script type="module" src="/js/reader.js"></script>
+</body>
+</html>

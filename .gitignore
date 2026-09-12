@@ -1,0 +1,8 @@
+node_modules/
+data/
+.env
+*.log
+.DS_Store
+
+# 前端依赖由 npm install 的 postinstall 从 node_modules 复制（scripts/vendor.js）
+public/vendor/

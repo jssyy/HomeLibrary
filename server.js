@@ -1,0 +1,159 @@
+/**
+ * 家庭图书馆 —— 服务入口
+ * 手机 / 平板 / PC 同一套响应式界面，数据全部存在本机 data/ 目录里。
+ */
+process.removeAllListeners('warning'); // node:sqlite 的实验性警告，眼不见为净
+
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const config = require('./src/config');
+const { lanAddresses, preferredAddresses } = require('./src/net');
+require('./src/db'); // 建表 / 迁移
+
+const app = express();
+
+app.disable('x-powered-by');
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// ------------------------------------------------------------------ 可选口令
+
+function sign(v) {
+  return crypto.createHmac('sha256', config.SECRET).update(String(v)).digest('hex').slice(0, 32);
+}
+
+if (config.PIN) {
+  const token = sign(config.PIN);
+  app.use((req, res, next) => {
+    if (req.path === '/api/login' || req.path === '/login.html' || /^\/(css|js|vendor|icons)\//.test(req.path)) {
+      return next();
+    }
+    const cookie = /hl_auth=([a-f0-9]+)/.exec(req.headers.cookie || '');
+    if (cookie && cookie[1] === token) return next();
+    if (req.path.startsWith('/api/')) return res.status(401).json({ error: '需要口令' });
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+  });
+  app.post('/api/login', (req, res) => {
+    if (String((req.body || {}).pin) !== String(config.PIN)) {
+      return res.status(403).json({ error: '口令不对' });
+    }
+    res.setHeader('Set-Cookie', `hl_auth=${token}; Path=/; Max-Age=31536000; SameSite=Lax`);
+    res.json({ ok: true });
+  });
+}
+
+// ------------------------------------------------------------------ 静态资源
+
+// 不设强缓存，改用 ETag 协商缓存：改完代码刷新就能看到新版；
+// 手机离线访问由 Service Worker 负责缓存。
+app.use(express.static(path.join(__dirname, 'public'), { maxAge: 0, etag: true, index: false }));
+app.use('/covers', express.static(config.COVERS_DIR, { maxAge: '30d' }));
+
+// ------------------------------------------------------------------ API
+
+app.use('/api', require('./src/routes/books'));
+app.use('/api', require('./src/routes/reading'));
+app.use('/api', require('./src/routes/files'));
+app.use('/api', require('./src/routes/meta'));
+app.use('/api', require('./src/routes/ocr'));
+
+app.get('/api/health', (req, res) => res.json({ ok: true, version: require('./package.json').version }));
+
+// ------------------------------------------------------------------ 页面
+
+app.get('/read/:fileId', (req, res) => res.sendFile(path.join(__dirname, 'public', 'reader.html')));
+app.get(/^(?!\/api\/).*/, (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// ------------------------------------------------------------------ 错误处理
+
+app.use((err, req, res, next) => {
+  console.error('[error]', req.method, req.originalUrl, err.message);
+  const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : 500);
+  res.status(status).json({ error: err.message || '服务器开小差了' });
+});
+
+// ------------------------------------------------------------------ 启动
+
+function start() {
+  const proto = config.HTTPS ? 'https' : 'http';
+  let server;
+
+  if (config.HTTPS) {
+    const keyFile = path.join(config.CERT_DIR, 'key.pem');
+    const certFile = path.join(config.CERT_DIR, 'cert.pem');
+    if (!fs.existsSync(keyFile) || !fs.existsSync(certFile)) {
+      console.log('[cert] 没有证书，正在生成自签名证书…');
+      require('./scripts/gen-cert')();
+    }
+    server = require('https').createServer(
+      { key: fs.readFileSync(keyFile), cert: fs.readFileSync(certFile) },
+      app
+    );
+  } else {
+    server = require('http').createServer(app);
+  }
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      const win = process.platform === 'win32';
+      console.error(`\n  端口 ${config.PORT} 已被占用——多半是之前启动的服务还在跑。\n`);
+      console.error('  停掉占用它的进程：');
+      console.error(
+        win
+          ? `    Get-NetTCPConnection -LocalPort ${config.PORT} -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`
+          : `    lsof -ti tcp:${config.PORT} | xargs kill -9`
+      );
+      console.error('\n  或者换个端口启动：');
+      console.error(win ? '    $env:HL_PORT=8081; npm start' : '    HL_PORT=8081 npm start');
+      console.error('');
+    } else if (err.code === 'EACCES') {
+      console.error(`\n  没有权限监听端口 ${config.PORT}，换一个 1024 以上的端口试试。\n`);
+    } else {
+      console.error('\n  启动失败：', err.message, '\n');
+    }
+    process.exit(1);
+  });
+
+  server.listen(config.PORT, '0.0.0.0', () => {
+    const preferred = preferredAddresses();
+    const preferredIps = new Set(preferred.map((a) => a.ip));
+    const skipped = lanAddresses().filter((a) => !preferredIps.has(a.ip));
+
+    const lines = [
+      '',
+      '  📚 家庭图书馆已启动',
+      '',
+      `  本机：     ${proto}://localhost:${config.PORT}`,
+      ...preferred.map((a) => `  手机/平板： ${proto}://${a.ip}:${config.PORT}   （${a.name}）`),
+      '',
+    ];
+
+    if (skipped.length) {
+      lines.push(
+        `  已略过 ${skipped.length} 个虚拟网卡地址（VMware / TUN 代理之类，手机连不上）：`,
+        `    ${skipped.map((a) => a.ip).join('、')}`,
+        ''
+      );
+    }
+
+    if (config.HTTPS) {
+      lines.push('  证书是自签名的，手机首次打开会提示"不安全"，选「继续访问」即可。');
+      lines.push('  摄像头扫码必须在 https 或 localhost 下才能用，所以默认开了 https。');
+      lines.push('');
+    }
+
+    lines.push('  手机打不开？依次检查：');
+    lines.push('    1) 手机和电脑连的是同一个 Wi-Fi（别连成手机热点或访客网络）');
+    lines.push('    2) Windows 防火墙放行 Node —— 管理员 PowerShell 执行：');
+    lines.push(`       New-NetFirewallRule -DisplayName "HomeLibrary" -Direction Inbound -Protocol TCP -LocalPort ${config.PORT} -Action Allow`);
+    lines.push('    3) 路由器开了「AP 隔离 / 客户端隔离」的话，关掉它');
+    lines.push('');
+
+    console.log(lines.join('\n'));
+  });
+}
+
+start();

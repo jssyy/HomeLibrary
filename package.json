@@ -1,0 +1,33 @@
+{
+  "name": "home-library",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "家庭图书馆 - 购书记录、家庭成员阅读进度、扫码录入与在线阅读",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "vendor": "node scripts/vendor.js",
+    "cert": "node scripts/gen-cert.js",
+    "migrate:old": "node scripts/migrate-old-db.js",
+    "postinstall": "node scripts/vendor.js",
+    "icons": "node scripts/gen-icons.js",
+    "covers": "node scripts/fetch-covers.js",
+    "ocr:setup": "node scripts/setup-ocr.js"
+  },
+  "dependencies": {
+    "@zxing/library": "^0.21.3",
+    "epubjs": "^0.3.93",
+    "express": "^4.21.2",
+    "jimp": "^0.22.12",
+    "jszip": "^3.10.1",
+    "multer": "^1.4.5-lts.1",
+    "pdfjs-dist": "^4.10.38",
+    "selfsigned": "^2.4.1",
+    "tesseract.js": "^7.0.0",
+    "undici": "^7.16.0"
+  }
+}

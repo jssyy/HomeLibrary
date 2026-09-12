@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#f7f3ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15130f" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="家庭图书馆">
+<title>家庭图书馆</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<div id="app">
+  <!-- 侧边栏：PC / 平板 -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">📚</span>
+      <span class="brand-text" id="brandName">我们家的图书馆</span>
+    </div>
+    <nav class="nav" id="navDesktop"></nav>
+    <div class="sidebar-foot">
+      <div class="member-chips" id="memberChips"></div>
+    </div>
+  </aside>
+
+  <!-- 主体 -->
+  <main class="main">
+    <header class="topbar">
+      <button class="icon-btn only-mobile" id="btnBack" hidden aria-label="返回">‹</button>
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input id="globalSearch" type="search" placeholder="搜书名 / 作者 / 出版社 / ISBN" autocomplete="off">
+        <button class="icon-btn clear" id="btnClearSearch" hidden aria-label="清空">×</button>
+      </div>
+      <button class="icon-btn accent" id="btnScanTop" title="扫码录入">⌸</button>
+    </header>
+
+    <div id="view" class="view"></div>
+  </main>
+
+  <!-- 底部标签栏：手机 -->
+  <nav class="tabbar" id="navMobile"></nav>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<div id="modalRoot"></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
