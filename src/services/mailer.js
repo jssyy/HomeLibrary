@@ -1,4 +1,9 @@
-/** 发信：配了 SMTP 就真发，没配就把邮件打印到控制台（自己部署、局域网用也能找回密码） */
+/**
+ * 发信，按优先级：
+ *   1. Brevo 邮件 API（https，云平台屏蔽 SMTP 端口时也能发）
+ *   2. SMTP
+ *   3. 都没配：把邮件打印到控制台（自己部署、局域网用也能找回密码）
+ */
 const config = require('../config');
 
 let transport = null;
@@ -18,10 +23,40 @@ function getTransport() {
 }
 
 function isConfigured() {
-  return !!config.SMTP_HOST;
+  return !!(config.BREVO_API_KEY || config.SMTP_HOST);
+}
+
+/** "家庭图书馆 <a@b.com>" → { name, email } */
+function parseAddress(v) {
+  const m = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(String(v || ''));
+  if (m) return { name: m[1].replace(/^["']|["']$/g, '') || undefined, email: m[2].trim() };
+  return { email: String(v || '').trim() };
+}
+
+async function sendViaBrevo({ to, subject, text, html }) {
+  const sender = parseAddress(config.MAIL_FROM);
+  if (!sender.email) throw new Error('用 Brevo 发信需要配置 HL_MAIL_FROM（在 Brevo 里验证过的发件邮箱）');
+  const res = await fetch(config.BREVO_API_URL, {
+    method: 'POST',
+    headers: { 'api-key': config.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      sender: { name: sender.name || '家庭图书馆', email: sender.email },
+      to: [{ email: to }],
+      subject,
+      textContent: text,
+      htmlContent: html || undefined,
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Brevo 返回 ${res.status}：${body.slice(0, 300)}`);
+  }
+  return { sent: true, via: 'brevo' };
 }
 
 async function send({ to, subject, text, html }) {
+  if (config.BREVO_API_KEY) return sendViaBrevo({ to, subject, text, html });
   const t = getTransport();
   if (!t) {
     console.log(

@@ -49,6 +49,10 @@ const config = {
   SMTP_USER: process.env.HL_SMTP_USER || '',
   SMTP_PASS: process.env.HL_SMTP_PASS || '',
   MAIL_FROM: process.env.HL_MAIL_FROM || process.env.HL_SMTP_USER || '',
+  // Brevo 邮件 API：走 https 发信，适合屏蔽了 SMTP 端口的云平台（如 Render 免费套餐）。
+  // 配了它就优先用它，发件人 HL_MAIL_FROM 必须是在 Brevo 里验证过的邮箱
+  BREVO_API_KEY: process.env.HL_BREVO_API_KEY || '',
+  BREVO_API_URL: process.env.HL_BREVO_API_URL || 'https://api.brevo.com/v3/smtp/email',
   // Z-Library 站点地址（官方镜像会变动，可在 .env 里覆盖）
   ZLIB_BASE: process.env.HL_ZLIB_BASE || 'https://zh.z-library.sk',
   // 元数据来源
