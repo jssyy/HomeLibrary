@@ -18,7 +18,10 @@ services:
         value: "false"            # 公开站点默认关闭 Z-Library 来源
       - key: HL_ALLOW_REGISTER
         value: "true"             # 只想让熟人试用就改成 false，凭邀请链接注册
-      # 发信（找回密码、验证邮箱）。在 Render 控制台里填，不要写进仓库
+      # 发信（找回密码、验证邮箱）。在 Render 控制台里填，不要写进仓库。
+      # 免费套餐屏蔽 SMTP 端口，推荐用 Brevo：填 HL_BREVO_API_KEY 和 HL_MAIL_FROM 即可，SMTP 那几项留空
+      - key: HL_BREVO_API_KEY
+        sync: false
       - key: HL_SMTP_HOST
         sync: false
       - key: HL_SMTP_PORT

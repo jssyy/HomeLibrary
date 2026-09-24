@@ -88,6 +88,7 @@ npm start
 | `HL_ZLIB_ENABLED` | true | Z-Library 来源的默认开关，公开站点建议 false |
 | `HL_SMTP_HOST` / `HL_SMTP_PORT` / `HL_SMTP_SECURE` | 空 / 465 / true | 发信服务器 |
 | `HL_SMTP_USER` / `HL_SMTP_PASS` / `HL_MAIL_FROM` | 空 | 发信账号、密码（授权码）、发件人 |
+| `HL_BREVO_API_KEY` | 空 | Brevo 邮件 API Key，配了就优先用它发信（走 https，不受 SMTP 端口屏蔽影响） |
 | `HL_UPLOAD_LIMIT_MB` | 200 | 单个电子书文件大小上限 |
 | `HL_DATA_DIR` | `./data` | 数据目录 |
 
@@ -122,7 +123,10 @@ GitHub 只存代码，跑不了 Node 服务；网站要部署到支持 Node / Do
 
 1. 登录 [render.com](https://render.com)（可以直接用 GitHub 账号）
 2. Dashboard → **New → Blueprint** → 选这个仓库，Render 会读取 `render.yaml` 自动建好服务
-3. 按提示填发信的环境变量（`HL_SMTP_*`），不填的话别人收不到找回密码邮件
+3. 按提示填发信的环境变量，不填的话收不到找回密码、验证邮箱的邮件。
+   Render 免费套餐屏蔽 SMTP 端口，推荐用 [Brevo](https://www.brevo.com)（免费每天 300 封）：
+   注册后在 Senders 里验证一个发件邮箱，在 SMTP & API → API Keys 里生成 Key，
+   然后只填 `HL_BREVO_API_KEY` 和 `HL_MAIL_FROM`（如 `家庭图书馆 <你验证过的邮箱>`）
 4. 部署完得到 `https://xxx.onrender.com`，发给别人就能注册试用
 
 注意：
