@@ -29,6 +29,7 @@ services:
         sync: false
       - key: HL_MAIL_FROM
         sync: false
+      # 站点管理员邮箱。公网部署务必填上，否则谁先注册谁就是管理员
       - key: HL_ADMIN_EMAILS
         sync: false
     # disk:

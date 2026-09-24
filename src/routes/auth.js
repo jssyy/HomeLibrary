@@ -18,6 +18,15 @@ const mailByIp = auth.rateLimiter({ windowMs: 60 * 60 * 1000, max: 10 });
 const mailByEmail = auth.rateLimiter({ windowMs: 60 * 60 * 1000, max: 3 });
 const registerByIp = auth.rateLimiter({ windowMs: 60 * 60 * 1000, max: 10 });
 
+/**
+ * 站点管理员：配了 HL_ADMIN_EMAILS 就只认名单里的邮箱；
+ * 没配才让第一个注册的账号当管理员（公网上谁先注册谁就是管理员，所以公开部署建议配上）。
+ */
+function shouldBeAdmin(email, userCount) {
+  if (config.ADMIN_EMAILS.length) return config.ADMIN_EMAILS.includes(email);
+  return userCount === 0;
+}
+
 // 账号不存在时拿它跑一遍校验，免得靠响应时间判断邮箱有没有注册
 const DUMMY_HASH = auth.hashPassword('dummy-password-1');
 
@@ -107,7 +116,7 @@ router.post(
       return res.status(409).json({ error: '这个邮箱已经注册过了，直接登录或找回密码吧' });
     }
 
-    const isAdmin = userCount === 0 || config.ADMIN_EMAILS.includes(email);
+    const isAdmin = shouldBeAdmin(email, userCount);
     const info = db
       .prepare('INSERT INTO users (email, password_hash, name, is_admin) VALUES (?,?,?,?)')
       .run(email, auth.hashPassword(b.password), name, isAdmin ? 1 : 0);
@@ -136,6 +145,11 @@ router.post(
     // 登录页带着邀请码来、自己还没有家庭的，顺手加入
     const invite = family.familyByInvite(b.invite);
     if (invite && !user.family_id) family.attachUser(user, invite.id);
+
+    // 后来才加进 HL_ADMIN_EMAILS 的老账号，登录时补上管理员身份
+    if (!user.is_admin && config.ADMIN_EMAILS.includes(user.email)) {
+      db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(user.id);
+    }
 
     auth.createSession(res, req, user.id);
     res.json(mePayload(user.id));

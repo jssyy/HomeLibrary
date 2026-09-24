@@ -13,7 +13,8 @@ export default async function bookView(root, { params }) {
 
   function paint() {
     wrap.innerHTML = '';
-    wrap.append(headSection(), siblingSection(), readingSection(), purchaseSection(), ebookSection(), noteSection(), linkSection(), dangerSection());
+    // 有的区块没内容时返回 null，append(null) 会在页面上多出一个 "null" 字样
+    wrap.append(...[headSection(), siblingSection(), readingSection(), purchaseSection(), ebookSection(), noteSection(), linkSection(), dangerSection()].filter(Boolean));
   }
 
   async function refresh() {
