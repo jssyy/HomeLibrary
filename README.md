@@ -85,6 +85,7 @@ npm start
 | `HL_ADMIN_EMAILS` | 空 | 站点管理员邮箱，逗号分隔；不填则第一个注册的是管理员 |
 | `HL_SESSION_DAYS` | 30 | 登录有效期（天） |
 | `HL_TRUST_PROXY` | 空 | 反向代理后面部署时设置，如 `1` |
+| `HL_ZLIB_ENABLED` | true | Z-Library 来源的默认开关，公开站点建议 false |
 | `HL_SMTP_HOST` / `HL_SMTP_PORT` / `HL_SMTP_SECURE` | 空 / 465 / true | 发信服务器 |
 | `HL_SMTP_USER` / `HL_SMTP_PASS` / `HL_MAIL_FROM` | 空 | 发信账号、密码（授权码）、发件人 |
 | `HL_UPLOAD_LIMIT_MB` | 200 | 单个电子书文件大小上限 |
@@ -112,6 +113,39 @@ public/         前端 SPA 与在线阅读器
 scripts/        证书、图标、OCR 模型、数据迁移等辅助脚本
 data/           数据库、封面、电子书（整个目录拷走 = 完整备份）
 ```
+
+## 部署成网站给别人用
+
+GitHub 只存代码，跑不了 Node 服务；网站要部署到支持 Node / Docker 的平台上。仓库里已经带了 `Dockerfile` 和 `render.yaml`。
+
+**Render（最省事）**
+
+1. 登录 [render.com](https://render.com)（可以直接用 GitHub 账号）
+2. Dashboard → **New → Blueprint** → 选这个仓库，Render 会读取 `render.yaml` 自动建好服务
+3. 按提示填发信的环境变量（`HL_SMTP_*`），不填的话别人收不到找回密码邮件
+4. 部署完得到 `https://xxx.onrender.com`，发给别人就能注册试用
+
+注意：
+
+- 免费套餐**没有持久化磁盘**，服务重启、重新部署后数据清空，只适合演示；
+  长期使用把 `render.yaml` 里的 `plan` 改成 `starter` 并打开 `disk` 配置（约 $7/月）
+- 免费套餐闲置 15 分钟会休眠，下次打开要等几十秒
+- Render 会自动提供对外地址，`HL_PUBLIC_URL` 不用填
+- 公开站点默认关闭 Z-Library 来源（`HL_ZLIB_ENABLED=false`）
+- 只想让熟人试用：`HL_ALLOW_REGISTER=false`，第一个人注册后发邀请链接给其他人
+
+**其它平台 / 自己的服务器**
+
+Railway、Zeabur、Fly.io 都能直接用 `Dockerfile` 部署；自己的服务器上：
+
+```bash
+docker build -t home-library .
+docker run -d -p 8080:8080 -v $(pwd)/data:/data \
+  -e HL_PUBLIC_URL=https://books.example.com -e HL_TRUST_PROXY=1 \
+  --env-file .env home-library
+```
+
+前面用 nginx / Caddy 配 https。数据都在挂载的 `data/` 目录里。
 
 ## 从单机版升级
 

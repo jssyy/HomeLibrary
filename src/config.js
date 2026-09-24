@@ -20,12 +20,14 @@ const config = {
   FILES_DIR: path.join(DATA_DIR, 'files'),   // 电子书文件
   COVERS_DIR: path.join(DATA_DIR, 'covers'), // 本地缓存封面
   CERT_DIR: path.join(DATA_DIR, 'cert'),
-  PORT: Number(process.env.HL_PORT || 8080),
+  // 云平台（Render / Railway / Zeabur 等）通过 PORT 指定端口
+  PORT: Number(process.env.HL_PORT || process.env.PORT || 8080),
   // 手机摄像头扫码要求安全上下文(https 或 localhost)，局域网访问请开 https
   HTTPS: String(process.env.HL_HTTPS || 'true') !== 'false',
   // 对外访问地址，用来拼邮件里的重置密码 / 验证链接，如 https://books.example.com
   // 不填就用请求里的 Host（只建议在局域网里这么用）
-  PUBLIC_URL: (process.env.HL_PUBLIC_URL || '').replace(/\/+$/, ''),
+  // Render 会自动提供 RENDER_EXTERNAL_URL，部署在 Render 上可以不填
+  PUBLIC_URL: (process.env.HL_PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/+$/, ''),
   // 是否开放注册；关掉后只有持邀请链接的人能注册
   ALLOW_REGISTER: String(process.env.HL_ALLOW_REGISTER || 'true') !== 'false',
   // 站点管理员邮箱（逗号分隔）；不填则第一个注册的账号是管理员
@@ -51,6 +53,8 @@ const config = {
   ZLIB_BASE: process.env.HL_ZLIB_BASE || 'https://zh.z-library.sk',
   // 元数据来源
   GOOGLE_BOOKS_KEY: process.env.HL_GOOGLE_BOOKS_KEY || '',
+  // 书目来源里 Z-Library 的默认开关；对外公开的站点建议设成 false
+  ZLIB_ENABLED: String(process.env.HL_ZLIB_ENABLED || 'true') !== 'false',
   UPLOAD_LIMIT_MB: Number(process.env.HL_UPLOAD_LIMIT_MB || 200),
 };
 

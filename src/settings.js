@@ -8,7 +8,7 @@ const DEFAULTS = {
   source_googlebooks: '1',
   source_openlibrary: '1',
   source_weread: '1',
-  source_zlibrary: '1',
+  source_zlibrary: config.ZLIB_ENABLED ? '1' : '0',
   source_douban: '1',
   google_books_key: config.GOOGLE_BOOKS_KEY || '',
   zlib_base: config.ZLIB_BASE,
