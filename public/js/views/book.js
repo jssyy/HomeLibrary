@@ -266,7 +266,7 @@ export default async function bookView(root, { params }) {
         { name: 'quantity', label: '数量', type: 'number', min: 1, value: (p && p.quantity) || 1 },
       ] },
       { name: 'buyer_id', label: '购买人', type: 'select', value: (p && p.buyer_id) || '',
-        options: [{ value: '', label: '未指定' }, ...store.members.map((m) => ({ value: m.id, label: `${m.emoji} ${m.name}` }))] },
+        options: [{ value: '', label: '未指定' }, ...store.members.filter((m) => m.active).map((m) => ({ value: m.id, label: `${m.emoji} ${m.name}` }))] },
       { name: 'note', label: '备注', placeholder: '例：活动满 200-100' },
     ]);
 
@@ -366,7 +366,7 @@ export default async function bookView(root, { params }) {
   }
 
   function openReader(fileId) {
-    const member = store.currentMember || (book.readings[0] && book.readings[0].member_id) || '';
+    const member = store.actingMember() || (book.readings[0] && book.readings[0].member_id) || '';
     location.href = `/read/${fileId}?member=${member}`;
   }
 
@@ -405,8 +405,8 @@ export default async function bookView(root, { params }) {
       { name: 'note', label: '我的想法', type: 'textarea', rows: 3, value: (n && n.note) || '' },
       { type: 'group', fields: [
         { name: 'chapter', label: '章节', value: (n && n.chapter) || '' },
-        { name: 'member_id', label: '谁写的', type: 'select', value: (n && n.member_id) || store.currentMember || '',
-          options: [{ value: '', label: '未署名' }, ...store.members.map((m) => ({ value: m.id, label: `${m.emoji} ${m.name}` }))] },
+        { name: 'member_id', label: '谁写的', type: 'select', value: (n && n.member_id) || store.actingMember() || '',
+          options: [{ value: '', label: '未署名' }, ...store.members.filter((m) => m.active).map((m) => ({ value: m.id, label: `${m.emoji} ${m.name}` }))] },
       ] },
     ]);
     const actions = [{ label: '取消', value: 'cancel', class: 'ghost' }];

@@ -7,6 +7,7 @@ const zlibrary = require('../services/zlibrary');
 const http = require('../services/http');
 const isbnUtil = require('../services/isbn');
 const { wrap, str, int, num, csvEscape, CHANNELS, CARRIERS, STATUSES } = require('../util');
+const { requireAdmin } = require('../auth');
 
 const router = express.Router();
 
@@ -25,12 +26,12 @@ router.get(
     // 所以这里返回全部，由前端提示「已有这些分册」而不是直接拦住。
     if (out.isbn) {
       out.existing_list = db
-        .prepare('SELECT id, title, volume, author FROM books WHERE isbn13 = ? ORDER BY volume, id')
-        .all(out.isbn);
+        .prepare('SELECT id, title, volume, author FROM books WHERE family_id = ? AND isbn13 = ? ORDER BY volume, id')
+        .all(req.familyId, out.isbn);
     } else {
       out.existing_list = db
-        .prepare('SELECT id, title, volume, author FROM books WHERE title = ?')
-        .all(q);
+        .prepare('SELECT id, title, volume, author FROM books WHERE family_id = ? AND title = ?')
+        .all(req.familyId, q);
     }
     out.existing = out.existing_list[0] || null;
     out.zlib_url = zlibrary.searchUrl({ isbn: out.isbn, title: out.isbn ? null : q });
@@ -76,6 +77,7 @@ router.get(
 
 router.get(
   '/zlib/health',
+  requireAdmin,
   wrap(async (req, res) => res.json(await zlibrary.health()))
 );
 
@@ -135,20 +137,28 @@ router.get(
 
 // ------------------------------------------------------------------ 设置
 
+// 书库名字、成员这些是家庭自己的；代理、书目来源、识别引擎、各种 Key 是全站共用的，
+// 只有站点管理员能看能改。普通成员只拿到界面需要的选项。
 router.get(
   '/settings',
   wrap((req, res) => {
     const all = settings.all();
+    const base = {
+      currency: all.currency,
+      options: { channels: CHANNELS, carriers: CARRIERS, statuses: STATUSES },
+      can_admin: !!req.user.is_admin,
+    };
+    if (!req.user.is_admin) return res.json(base);
     // Cookie 只回显长度，不回显内容
     res.json({
       ...all,
+      ...base,
       zlib_cookie: all.zlib_cookie ? `已保存（${all.zlib_cookie.length} 字符）` : '',
       zlib_cookie_set: !!all.zlib_cookie,
       google_books_key: all.google_books_key ? '已保存' : '',
       google_books_key_set: !!all.google_books_key,
       vision_api_key: all.vision_api_key ? '已保存' : '',
       vision_api_key_set: !!all.vision_api_key,
-      options: { channels: CHANNELS, carriers: CARRIERS, statuses: STATUSES },
       providers: metadata.PROVIDERS.map((p) => ({ key: p.key, name: p.name, isbn: p.isbn })),
     });
   })
@@ -156,6 +166,7 @@ router.get(
 
 router.put(
   '/settings',
+  requireAdmin,
   wrap((req, res) => {
     const patch = { ...(req.body || {}) };
     // 前端没改就不要把回显文本写回去
@@ -170,6 +181,7 @@ router.put(
 /** 网络自检：代理、各来源连通性 */
 router.get(
   '/settings/test',
+  requireAdmin,
   wrap(async (req, res) => {
     const [douban, google, openlib, weread, zlib] = await Promise.all([
       http.ping('https://book.douban.com/j/subject_suggest?q=test'),
@@ -195,42 +207,43 @@ router.get(
   '/stats',
   wrap((req, res) => {
     const year = str(req.query.year) || String(new Date().getFullYear());
+    const f = req.familyId;
     const one = (sql, ...a) => db.prepare(sql).get(...a);
     const many = (sql, ...a) => db.prepare(sql).all(...a);
+    // 购买、阅读都通过书归属家庭
+    const P = 'purchases p JOIN books b ON b.id = p.book_id AND b.family_id = ?';
+    const R = 'readings r JOIN books b ON b.id = r.book_id AND b.family_id = ?';
 
     const overview = {
-      books: one('SELECT COUNT(*) AS c FROM books WHERE archived=0 AND owned=1').c,
-      wishlist: one('SELECT COUNT(*) AS c FROM books WHERE owned=0').c,
-      ebooks: one('SELECT COUNT(DISTINCT book_id) AS c FROM files').c,
-      pages: one('SELECT IFNULL(SUM(pages),0) AS c FROM books WHERE archived=0 AND owned=1').c,
-      spend_total: one('SELECT IFNULL(SUM(price*IFNULL(quantity,1)),0) AS c FROM purchases').c,
+      books: one('SELECT COUNT(*) AS c FROM books WHERE family_id=? AND archived=0 AND owned=1', f).c,
+      wishlist: one('SELECT COUNT(*) AS c FROM books WHERE family_id=? AND owned=0', f).c,
+      ebooks: one('SELECT COUNT(DISTINCT fl.book_id) AS c FROM files fl JOIN books b ON b.id = fl.book_id WHERE b.family_id=?', f).c,
+      pages: one('SELECT IFNULL(SUM(pages),0) AS c FROM books WHERE family_id=? AND archived=0 AND owned=1', f).c,
+      spend_total: one(`SELECT IFNULL(SUM(p.price*IFNULL(p.quantity,1)),0) AS c FROM ${P}`, f).c,
       spend_year: one(
-        "SELECT IFNULL(SUM(price*IFNULL(quantity,1)),0) AS c FROM purchases WHERE strftime('%Y',purchased_at)=?",
-        year
+        `SELECT IFNULL(SUM(p.price*IFNULL(p.quantity,1)),0) AS c FROM ${P} WHERE strftime('%Y',p.purchased_at)=?`,
+        f, year
       ).c,
-      bought_year: one(
-        "SELECT COUNT(*) AS c FROM purchases WHERE strftime('%Y',purchased_at)=?",
-        year
-      ).c,
+      bought_year: one(`SELECT COUNT(*) AS c FROM ${P} WHERE strftime('%Y',p.purchased_at)=?`, f, year).c,
       finished_year: one(
-        "SELECT COUNT(*) AS c FROM readings WHERE status='已读' AND strftime('%Y',finished_at)=?",
-        year
+        `SELECT COUNT(*) AS c FROM ${R} WHERE r.status='已读' AND strftime('%Y',r.finished_at)=?`,
+        f, year
       ).c,
     };
 
     const byMonth = many(
-      `SELECT strftime('%Y-%m', purchased_at) AS month, COUNT(*) AS count,
-              IFNULL(SUM(price*IFNULL(quantity,1)),0) AS amount
-         FROM purchases WHERE purchased_at IS NOT NULL AND strftime('%Y',purchased_at)=?
+      `SELECT strftime('%Y-%m', p.purchased_at) AS month, COUNT(*) AS count,
+              IFNULL(SUM(p.price*IFNULL(p.quantity,1)),0) AS amount
+         FROM ${P} WHERE p.purchased_at IS NOT NULL AND strftime('%Y',p.purchased_at)=?
         GROUP BY month ORDER BY month`,
-      year
+      f, year
     );
 
     const finishedByMonth = many(
-      `SELECT strftime('%Y-%m', finished_at) AS month, COUNT(*) AS count
-         FROM readings WHERE status='已读' AND finished_at IS NOT NULL AND strftime('%Y',finished_at)=?
+      `SELECT strftime('%Y-%m', r.finished_at) AS month, COUNT(*) AS count
+         FROM ${R} WHERE r.status='已读' AND r.finished_at IS NOT NULL AND strftime('%Y',r.finished_at)=?
         GROUP BY month ORDER BY month`,
-      year
+      f, year
     );
 
     const members = many(
@@ -243,31 +256,35 @@ router.get(
          FROM members m
          LEFT JOIN readings r ON r.member_id = m.id
          LEFT JOIN books b ON b.id = r.book_id
-        WHERE m.active = 1
+        WHERE m.active = 1 AND m.family_id = ?
         GROUP BY m.id ORDER BY m.sort_order`,
-      year
+      year, f
     );
 
     const channels = many(
-      `SELECT IFNULL(channel,'未填') AS channel, COUNT(*) AS count,
-              IFNULL(SUM(price*IFNULL(quantity,1)),0) AS amount
-         FROM purchases GROUP BY channel ORDER BY amount DESC LIMIT 12`
+      `SELECT IFNULL(p.channel,'未填') AS channel, COUNT(*) AS count,
+              IFNULL(SUM(p.price*IFNULL(p.quantity,1)),0) AS amount
+         FROM ${P} GROUP BY p.channel ORDER BY amount DESC LIMIT 12`,
+      f
     );
 
     const categories = many(
       `SELECT category AS name, COUNT(*) AS count FROM books
-        WHERE category IS NOT NULL AND category<>'' AND archived=0
-        GROUP BY category ORDER BY count DESC LIMIT 12`
+        WHERE family_id=? AND category IS NOT NULL AND category<>'' AND archived=0
+        GROUP BY category ORDER BY count DESC LIMIT 12`,
+      f
     );
 
     const authors = many(
       `SELECT author AS name, COUNT(*) AS count FROM books
-        WHERE author IS NOT NULL AND author<>'' AND archived=0
-        GROUP BY author ORDER BY count DESC LIMIT 10`
+        WHERE family_id=? AND author IS NOT NULL AND author<>'' AND archived=0
+        GROUP BY author ORDER BY count DESC LIMIT 10`,
+      f
     );
 
     const years = many(
-      "SELECT DISTINCT strftime('%Y', purchased_at) AS year FROM purchases WHERE purchased_at IS NOT NULL ORDER BY year DESC"
+      `SELECT DISTINCT strftime('%Y', p.purchased_at) AS year FROM ${P} WHERE p.purchased_at IS NOT NULL ORDER BY year DESC`,
+      f
     ).map((r) => r.year);
 
     res.json({ year, years, overview, byMonth, finishedByMonth, members, channels, categories, authors });
@@ -276,18 +293,23 @@ router.get(
 
 // ------------------------------------------------------------------ 导入导出
 
+/** 只导出本家庭的数据 */
 router.get(
   '/export.json',
   wrap((req, res) => {
+    const f = req.familyId;
+    const byBook = (table) =>
+      db.prepare(`SELECT t.* FROM ${table} t JOIN books b ON b.id = t.book_id WHERE b.family_id = ?`).all(f);
     const dump = {
       exported_at: new Date().toISOString(),
-      members: db.prepare('SELECT * FROM members').all(),
-      books: db.prepare('SELECT * FROM books').all(),
-      purchases: db.prepare('SELECT * FROM purchases').all(),
-      readings: db.prepare('SELECT * FROM readings').all(),
-      reading_logs: db.prepare('SELECT * FROM reading_logs').all(),
-      notes: db.prepare('SELECT * FROM notes').all(),
-      files: db.prepare('SELECT * FROM files').all(),
+      family: db.prepare('SELECT id, name, created_at FROM families WHERE id = ?').get(f),
+      members: db.prepare('SELECT id, name, emoji, color, sort_order, active FROM members WHERE family_id = ?').all(f),
+      books: db.prepare('SELECT * FROM books WHERE family_id = ?').all(f),
+      purchases: byBook('purchases'),
+      readings: byBook('readings'),
+      reading_logs: byBook('reading_logs'),
+      notes: byBook('notes'),
+      files: byBook('files'),
     };
     res.setHeader('Content-Disposition', `attachment; filename="home-library-${Date.now()}.json"`);
     res.json(dump);
@@ -297,8 +319,8 @@ router.get(
 router.get(
   '/export.csv',
   wrap((req, res) => {
-    const members = db.prepare('SELECT * FROM members WHERE active=1 ORDER BY sort_order').all();
-    const books = db.prepare('SELECT * FROM books ORDER BY id').all();
+    const members = db.prepare('SELECT * FROM members WHERE family_id=? AND active=1 ORDER BY sort_order').all(req.familyId);
+    const books = db.prepare('SELECT * FROM books WHERE family_id=? ORDER BY id').all(req.familyId);
     const head = [
       '书名', '副标题', '作者', '译者', '出版社', '出版日期', '页数', 'ISBN', '定价',
       '分类', '标签', '载体', '位置', '购买次数', '花费合计', '最近购买',

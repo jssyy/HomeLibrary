@@ -17,6 +17,11 @@ async function req(method, url, body, opts = {}) {
     data = { error: text.slice(0, 200) };
   }
   if (!res.ok) {
+    // 登录过期 / 被移出家庭：回登录页（登录页自己的请求不跳，免得死循环）
+    const code = data && data.code;
+    if ((code === 'AUTH_REQUIRED' || code === 'FAMILY_REQUIRED') && location.pathname !== '/login.html') {
+      location.href = code === 'AUTH_REQUIRED' ? '/login.html' : '/login.html#family';
+    }
     const err = new Error((data && data.error) || `请求失败 (${res.status})`);
     err.status = res.status;
     err.data = data;
@@ -36,6 +41,32 @@ const qs = (params = {}) => {
 };
 
 export const api = {
+  // 账号
+  authConfig: (invite) => req('GET', `/api/auth/config${qs({ invite })}`),
+  me: () => req('GET', '/api/auth/me'),
+  register: (d) => req('POST', '/api/auth/register', d),
+  login: (d) => req('POST', '/api/auth/login', d),
+  logout: () => req('POST', '/api/auth/logout'),
+  forgot: (email) => req('POST', '/api/auth/forgot', { email }),
+  checkReset: (token) => req('GET', `/api/auth/reset/check${qs({ token })}`),
+  resetPassword: (token, password) => req('POST', '/api/auth/reset', { token, password }),
+  verifyEmail: (token) => req('POST', '/api/auth/verify', { token }),
+  resendVerify: () => req('POST', '/api/auth/verify/resend'),
+  updateProfile: (d) => req('PUT', '/api/auth/profile', d),
+  changePassword: (d) => req('PUT', '/api/auth/password', d),
+
+  // 家庭
+  family: () => req('GET', '/api/family'),
+  createFamily: (name) => req('POST', '/api/family', { name }),
+  previewInvite: (code) => req('GET', `/api/family/invite/${encodeURIComponent(code)}`),
+  joinFamily: (code) => req('POST', '/api/family/join', { code }),
+  renameFamily: (name) => req('PUT', '/api/family', { name }),
+  resetInvite: () => req('POST', '/api/family/invite/reset'),
+  removeAccount: (userId) => req('DELETE', `/api/family/accounts/${userId}`),
+  transferFamily: (userId) => req('POST', '/api/family/transfer', { user_id: userId }),
+  leaveFamily: () => req('POST', '/api/family/leave'),
+  dissolveFamily: (confirm) => req('DELETE', '/api/family', { confirm }),
+
   // 书
   books: (params) => req('GET', `/api/books${qs(params)}`),
   facets: () => req('GET', '/api/books/facets'),

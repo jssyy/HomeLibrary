@@ -1,17 +1,17 @@
-/** 设置：家庭成员、网络代理、书目来源、Z-Library、备份 */
+/** 设置：账号、家庭、家庭成员；站点管理员另有网络代理、书目来源、Z-Library 等全站设置 */
 import { h, toast, modal, confirmBox, form } from '../ui.js';
 import api from '../api.js';
-import { store } from '../app.js';
+import { store, logout, applyFamilyName } from '../app.js';
 
 export default async function settings(root) {
-  let s = await api.settings();
+  let [s, fam] = await Promise.all([api.settings(), api.family()]);
 
   const body = h('div', {});
   root.append(
     h('div', { class: 'page-head' },
       h('div', {},
         h('div', { class: 'page-title' }, '设置'),
-        h('div', { class: 'page-sub' }, '成员、网络、书目来源都在这儿')
+        h('div', { class: 'page-sub' }, s.can_admin ? '账号、家庭、网络、书目来源都在这儿' : '账号、家庭和成员')
       )
     ),
     body
@@ -21,7 +21,16 @@ export default async function settings(root) {
 
   function paint() {
     body.innerHTML = '';
-    body.append(membersCard(), generalCard(), photoCard(), proxyCard(), sourcesCard(), zlibCard(), backupCard(), aboutCard());
+    body.append(accountCard(), familyCard(), membersCard());
+    if (s.can_admin) {
+      body.append(
+        h('div', { class: 'section-title', style: { marginTop: '28px' } }, '站点设置',
+          h('span', { class: 'role-tag' }, '管理员')),
+        h('div', { class: 'small faint', style: { margin: '-4px 0 10px' } }, '下面这些对所有家庭生效，只有站点管理员能看到。'),
+        photoCard(), proxyCard(), sourcesCard(), zlibCard()
+      );
+    }
+    body.append(backupCard(), aboutCard());
   }
 
   async function save(patch, msg = '已保存') {
@@ -35,19 +44,276 @@ export default async function settings(root) {
     }
   }
 
+  // ---------------------------------------------------------------- 账号
+
+  function accountCard() {
+    const me = store.me.user;
+    return h('div', { class: 'section' },
+      h('div', { class: 'section-title' }, '我的账号'),
+      h('div', { class: 'card pad' },
+        me.email_verified
+          ? null
+          : h('div', { class: 'verify-bar' },
+              h('span', { style: { flex: '1' } }, '邮箱还没验证，验证后才能放心用它找回密码。'),
+              h('button', {
+                class: 'btn sm',
+                onclick: async (e) => {
+                  e.target.disabled = true;
+                  try {
+                    await api.resendVerify();
+                    toast('验证邮件已发出，去邮箱看看', 'ok');
+                  } catch (err) {
+                    toast(err.message, 'err');
+                    e.target.disabled = false;
+                  }
+                },
+              }, '发送验证邮件')),
+        h('div', { class: 'setting-row' },
+          h('div', { style: { flex: '1', minWidth: '0' } },
+            h('div', { style: { fontWeight: '600' } }, me.name,
+              me.is_admin ? h('span', { class: 'role-tag' }, '站点管理员') : null),
+            h('div', { class: 'desc ellip' }, me.email, me.email_verified ? ' · 已验证' : ' · 未验证')
+          ),
+          h('button', { class: 'btn sm', onclick: editProfile }, '改称呼')
+        ),
+        h('div', { class: 'setting-row' },
+          h('div', { style: { flex: '1' } },
+            h('div', { style: { fontWeight: '600' } }, '登录密码'),
+            h('div', { class: 'desc' }, '改完后其它设备上的登录会失效')
+          ),
+          h('button', { class: 'btn sm', onclick: changePassword }, '修改')
+        ),
+        h('div', { class: 'setting-row' },
+          h('div', { style: { flex: '1' } }, h('div', { style: { fontWeight: '600' } }, '退出登录')),
+          h('button', { class: 'btn sm danger', onclick: logout }, '退出')
+        )
+      )
+    );
+  }
+
+  async function editProfile() {
+    const f = form([{ name: 'name', label: '称呼（最多 20 字）', value: store.me.user.name }]);
+    const ok = await modal({
+      title: '改称呼', body: f.node,
+      actions: [{ label: '取消', value: false, class: 'ghost' }, { label: '保存', value: true, class: 'primary' }],
+    });
+    if (!ok) return;
+    try {
+      store.me = await api.updateProfile(f.values());
+      toast('已保存', 'ok');
+      paint();
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  async function changePassword() {
+    const f = form([
+      { name: 'old_password', label: '当前密码', type: 'password' },
+      { name: 'password', label: '新密码', type: 'password', placeholder: '至少 8 位，包含字母和数字' },
+      { name: 'password2', label: '再输一遍新密码', type: 'password' },
+    ]);
+    await modal({
+      title: '修改密码', body: f.node,
+      actions: [
+        { label: '取消', value: false, class: 'ghost' },
+        {
+          label: '保存', class: 'primary',
+          onClick: async () => {
+            const v = f.values();
+            if (v.password !== v.password2) {
+              toast('两次输入的新密码不一样', 'err');
+              return '__keep__';
+            }
+            try {
+              await api.changePassword({ old_password: v.old_password, password: v.password });
+              toast('密码已修改', 'ok');
+              return true;
+            } catch (e) {
+              toast(e.message, 'err');
+              return '__keep__';
+            }
+          },
+        },
+      ],
+    });
+  }
+
+  // ---------------------------------------------------------------- 家庭
+
+  function familyCard() {
+    const inviteUrl = `${location.origin}/login.html?invite=${fam.invite_code}`;
+    const others = fam.accounts.filter((a) => !a.is_me);
+
+    const copy = async (text, msg) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        toast(msg, 'ok');
+      } catch {
+        await modal({
+          title: '手动复制',
+          body: h('textarea', { rows: 3, readonly: true, style: { width: '100%' }, onfocus: (e) => e.target.select() }, text),
+          actions: [{ label: '好', value: true, class: 'primary' }],
+        });
+      }
+    };
+
+    return h('div', { class: 'section' },
+      h('div', { class: 'section-title' }, '家庭'),
+      h('div', { class: 'card pad' },
+        h('div', { class: 'setting-row' },
+          h('div', { style: { flex: '1' } },
+            h('div', { style: { fontWeight: '600' } }, fam.name),
+            h('div', { class: 'desc' }, `${fam.accounts.length} 个账号共享这个书库 · 创建于 ${String(fam.created_at).slice(0, 10)}`)
+          ),
+          fam.is_owner ? h('button', { class: 'btn sm', onclick: renameFamily }, '改名') : null
+        ),
+
+        h('div', { style: { padding: '12px 0', borderBottom: '1px solid var(--line-soft)' } },
+          h('div', { style: { fontWeight: '600' } }, '邀请家人'),
+          h('div', { class: 'small faint', style: { margin: '2px 0 8px' } },
+            '把邀请链接发给家里人，注册或登录后就会自动加入；也可以让对方在「加入家庭」时输入邀请码。'),
+          h('div', { class: 'row' },
+            h('span', { class: 'invite-code' }, fam.invite_code),
+            h('button', { class: 'btn sm primary', onclick: () => copy(inviteUrl, '邀请链接已复制') }, '复制邀请链接'),
+            h('button', { class: 'btn sm', onclick: () => copy(fam.invite_code, '邀请码已复制') }, '复制邀请码'),
+            fam.is_owner ? h('button', { class: 'btn sm ghost', onclick: resetInvite }, '换一个') : null
+          )
+        ),
+
+        fam.accounts.map((a) =>
+          h('div', { class: 'setting-row' },
+            h('span', { style: { fontSize: '22px' } }, a.emoji || '👤'),
+            h('div', { style: { flex: '1', minWidth: '0' } },
+              h('div', { style: { fontWeight: '600' } }, a.name,
+                a.is_owner ? h('span', { class: 'role-tag' }, '创建者') : null,
+                a.is_me ? h('span', { class: 'role-tag plain' }, '我') : null),
+              h('div', { class: 'desc ellip' }, a.email, a.email_verified ? '' : ' · 邮箱未验证')
+            ),
+            fam.is_owner && !a.is_me
+              ? h('div', { class: 'row', style: { gap: '4px', flexWrap: 'nowrap' } },
+                  h('button', { class: 'btn sm ghost', onclick: () => transfer(a) }, '转让'),
+                  h('button', { class: 'btn sm danger', onclick: () => removeAccount(a) }, '移出'))
+              : null
+          )
+        ),
+
+        h('div', { class: 'setting-row' },
+          h('div', { style: { flex: '1' } },
+            h('div', { style: { fontWeight: '600' } }, fam.is_owner && !others.length ? '解散家庭' : '退出家庭'),
+            h('div', { class: 'desc' },
+              fam.is_owner
+                ? others.length
+                  ? '你是创建者，要退出请先把家庭转让给其他成员'
+                  : '家里只有你一个人，解散会删除全部藏书、购书记录和电子书'
+                : '退出后看不到这个书库；你的阅读记录会保留，重新加入时恢复')
+          ),
+          fam.is_owner && others.length
+            ? null
+            : h('button', { class: 'btn sm danger', onclick: fam.is_owner ? dissolve : leave }, fam.is_owner ? '解散' : '退出')
+        )
+      )
+    );
+  }
+
+  async function reloadFamily(next) {
+    fam = next || (await api.family());
+    store.me = await api.me();
+    applyFamilyName(fam.name);
+    await store.refreshMembers();
+    paint();
+  }
+
+  async function renameFamily() {
+    const f = form([{ name: 'name', label: '家庭名字（最多 30 字）', value: fam.name }]);
+    const ok = await modal({
+      title: '家庭改名', body: f.node,
+      actions: [{ label: '取消', value: false, class: 'ghost' }, { label: '保存', value: true, class: 'primary' }],
+    });
+    if (!ok) return;
+    try {
+      await reloadFamily(await api.renameFamily(f.values().name));
+      toast('已改名', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  async function resetInvite() {
+    if (!(await confirmBox('换一个新的邀请码？之前发出去的邀请链接会立即失效，已经加入的人不受影响。', { danger: false, okText: '换新的' }))) return;
+    try {
+      await reloadFamily(await api.resetInvite());
+      toast('邀请码已更换', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  async function transfer(a) {
+    if (!(await confirmBox(`把家庭转让给「${a.name}」？转让后 TA 是创建者，你变成普通成员。`, { okText: '转让' }))) return;
+    try {
+      await reloadFamily(await api.transferFamily(a.id));
+      toast('已转让', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  async function removeAccount(a) {
+    if (!(await confirmBox(`把「${a.name}」移出家庭？TA 会立即失去访问权限，阅读记录保留。`, { okText: '移出' }))) return;
+    try {
+      await reloadFamily(await api.removeAccount(a.id));
+      toast('已移出', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  async function leave() {
+    if (!(await confirmBox(`退出「${fam.name}」？之后需要邀请码才能重新加入。`, { okText: '退出家庭' }))) return;
+    try {
+      await api.leaveFamily();
+      location.href = '/login.html#family';
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
+  async function dissolve() {
+    const f = form([{ name: 'confirm', label: `输入家庭名字「${fam.name}」确认`, placeholder: fam.name }]);
+    const ok = await modal({
+      title: '解散家庭',
+      body: h('div', {},
+        h('p', { class: 'small', style: { color: '#c0392b', marginTop: '0' } }, '所有藏书、购书记录、阅读记录、笔记和上传的电子书都会被永久删除，无法恢复。建议先导出备份。'),
+        f.node),
+      actions: [{ label: '取消', value: false, class: 'ghost' }, { label: '永久解散', value: true, class: 'danger' }],
+    });
+    if (!ok) return;
+    try {
+      await api.dissolveFamily(f.values().confirm);
+      location.href = '/login.html#family';
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
   // ---------------------------------------------------------------- 成员
 
   function membersCard() {
     return h('div', { class: 'section' },
-      h('div', { class: 'section-title' }, '家庭成员',
+      h('div', { class: 'section-title' }, '阅读档案',
         h('span', { style: { flex: '1' } }),
         h('button', { class: 'btn sm', onclick: () => editMember(null) }, '＋ 添加')),
+      h('div', { class: 'small faint', style: { margin: '-4px 0 10px' } },
+        '每个账号自动有一份档案；没有账号的家人（比如小朋友）也可以在这里加一份，由大人代记进度。'),
       h('div', { class: 'card pad' },
         store.members.map((m) =>
-          h('div', { class: 'setting-row' },
+          h('div', { class: 'setting-row', style: m.active ? {} : { opacity: '.55' } },
             h('span', { style: { fontSize: '22px' } }, m.emoji),
             h('div', { style: { flex: '1' } },
-              h('div', { style: { fontWeight: '600' } }, m.name),
+              h('div', { style: { fontWeight: '600' } }, m.name,
+                m.is_me ? h('span', { class: 'role-tag plain' }, '我') : null,
+                m.has_account ? null : h('span', { class: 'role-tag plain' }, m.active ? '无账号' : '已离开')),
               h('div', { class: 'desc' }, `已读 ${m.counts['已读']} · 在读 ${m.counts['在读']} · 待读 ${m.counts['待读']}`)
             ),
             h('span', { style: { width: '16px', height: '16px', borderRadius: '50%', background: m.color } }),
@@ -67,14 +333,14 @@ export default async function settings(root) {
       ] },
     ]);
     const actions = [{ label: '取消', value: 'cancel', class: 'ghost' }];
-    if (m) actions.push({ label: '删除', value: 'delete', class: 'danger' });
+    if (m && !m.has_account) actions.push({ label: '删除', value: 'delete', class: 'danger' });
     actions.push({ label: '保存', value: 'save', class: 'primary' });
 
     const act = await modal({ title: m ? '编辑成员' : '添加成员', body: f.node, actions });
     if (!act || act === 'cancel') return;
     try {
       if (act === 'delete') {
-        if (!(await confirmBox(`删除「${m.name}」？他的阅读记录和笔记署名会一起删掉。`))) return;
+        if (!(await confirmBox(`删除「${m.name}」？TA 的阅读记录和笔记署名会一起删掉。`))) return;
         await api.deleteMember(m.id);
       } else {
         const v = f.values();
@@ -89,28 +355,6 @@ export default async function settings(root) {
       toast(e.message, 'err');
     }
   }
-
-  // ---------------------------------------------------------------- 通用
-
-  function generalCard() {
-    const nameInput = h('input', { value: s.library_name || '', style: inputStyle() });
-    return h('div', { class: 'section' },
-      h('div', { class: 'section-title' }, '基本'),
-      h('div', { class: 'card pad' },
-        h('div', { class: 'setting-row' },
-          h('div', { style: { flex: '1' } },
-            h('div', { style: { fontWeight: '600' } }, '书库名字'),
-            h('div', { class: 'desc' }, '显示在左上角和浏览器标题')
-          ),
-          nameInput,
-          h('button', {
-            class: 'btn sm', onclick: () => save({ library_name: nameInput.value.trim() || '我们家的图书馆' }),
-          }, '保存')
-        )
-      )
-    );
-  }
-
 
   // ---------------------------------------------------------------- 拍照识别
 

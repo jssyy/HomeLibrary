@@ -14,7 +14,6 @@ const DEFAULTS = {
   zlib_base: config.ZLIB_BASE,
   zlib_cookie: '',
   douban_cookie: '',
-  library_name: '我们家的图书馆',
   // 拍照识别：ocr_engine = auto | vision | local
   ocr_engine: 'auto',
   vision_enabled: '0',

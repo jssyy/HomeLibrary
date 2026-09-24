@@ -1,10 +1,13 @@
 /**
  * 从旧的 book_library/library.db 迁移数据。
  *
- *   node scripts/migrate-old-db.js [旧库路径] [--covers]
+ *   node scripts/migrate-old-db.js [旧库路径] [--covers] [--family=家庭ID]
  *
  * 旧库里 reading_progress 是 "成员A已读|成员B在读|成员C待读" 这样的拼接字符串，
  * 这里拆成每位成员一条阅读记录。加 --covers 会把封面下载到本地（要能连上图片站）。
+ *
+ * 数据导进哪个家庭：只有一个家庭时自动选它，多个时用 --family 指定；
+ * 还没有任何家庭时建一个「待认领」的，第一个注册的账号会成为它的主人。
  */
 const fs = require('fs');
 const path = require('path');
@@ -13,7 +16,7 @@ const { DatabaseSync } = require('node:sqlite');
 process.removeAllListeners('warning');
 
 const config = require('../src/config');
-const { db, ensureReadings } = require('../src/db');
+const { db, ensureReadings, newInviteCode } = require('../src/db');
 const meta = require('../src/services/metadata');
 const isbnUtil = require('../src/services/isbn');
 
@@ -22,6 +25,28 @@ const withCovers = args.includes('--covers');
 const oldPath =
   args.find((a) => !a.startsWith('--')) ||
   path.join(config.ROOT, '..', 'book_library', 'library.db');
+const familyArg = Number((args.find((a) => a.startsWith('--family=')) || '').split('=')[1]) || null;
+
+function resolveFamily() {
+  const families = db.prepare('SELECT id, name FROM families ORDER BY id').all();
+  if (familyArg) {
+    if (!families.some((f) => f.id === familyArg)) {
+      console.error(`没有 id 为 ${familyArg} 的家庭`);
+      process.exit(1);
+    }
+    return familyArg;
+  }
+  if (families.length === 1) return families[0].id;
+  if (families.length > 1) {
+    console.error('有多个家庭，请用 --family=ID 指定导进哪个：');
+    for (const f of families) console.error(`  ${f.id}  ${f.name}`);
+    process.exit(1);
+  }
+  const info = db.prepare('INSERT INTO families (name, invite_code) VALUES (?, ?)').run('我们家的图书馆', newInviteCode());
+  console.log('还没有家庭，已建一个待认领的，第一个注册的账号会成为它的主人');
+  return Number(info.lastInsertRowid);
+}
+let FAMILY = null;
 
 const STATUSES = ['待读', '在读', '已读', '弃读'];
 
@@ -52,17 +77,17 @@ function tsToDate(v) {
 
 /** 老库里的成员名对应到新库：默认成员还没用过就直接改名，免得留下一个空壳成员 */
 function resolveMember(name, usedNames) {
-  const hit = db.prepare('SELECT * FROM members WHERE name = ?').get(name);
+  const hit = db.prepare('SELECT * FROM members WHERE family_id = ? AND name = ?').get(FAMILY, name);
   if (hit) return hit.id;
 
   const spare = db
     .prepare(
       `SELECT m.* FROM members m
-        WHERE m.active = 1
+        WHERE m.family_id = ? AND m.active = 1 AND m.user_id IS NULL
           AND NOT EXISTS (SELECT 1 FROM readings r WHERE r.member_id = m.id AND r.status <> '待读')
         ORDER BY m.sort_order`
     )
-    .all()
+    .all(FAMILY)
     .find((m) => !usedNames.has(m.name));
 
   if (spare) {
@@ -70,10 +95,10 @@ function resolveMember(name, usedNames) {
     console.log(`  成员「${spare.name}」→「${name}」`);
     return spare.id;
   }
-  const maxOrder = db.prepare('SELECT IFNULL(MAX(sort_order),0) AS m FROM members').get().m;
+  const maxOrder = db.prepare('SELECT IFNULL(MAX(sort_order),0) AS m FROM members WHERE family_id = ?').get(FAMILY).m;
   const info = db
-    .prepare('INSERT INTO members (name, emoji, color, sort_order) VALUES (?,?,?,?)')
-    .run(name, '📖', '#7c5cff', maxOrder + 1);
+    .prepare('INSERT INTO members (family_id, name, emoji, color, sort_order) VALUES (?,?,?,?,?)')
+    .run(FAMILY, name, '📖', '#7c5cff', maxOrder + 1);
   console.log(`  新建成员「${name}」`);
   return Number(info.lastInsertRowid);
 }
@@ -83,7 +108,8 @@ async function main() {
     console.error(`找不到旧库：${oldPath}`);
     process.exit(1);
   }
-  console.log(`读取旧库：${oldPath}`);
+  FAMILY = resolveFamily();
+  console.log(`读取旧库：${oldPath}（导入到家庭 #${FAMILY}）`);
   const old = new DatabaseSync(oldPath, { readOnly: true });
   const rows = old.prepare('SELECT * FROM books ORDER BY id').all();
   console.log(`共 ${rows.length} 条记录\n`);
@@ -103,7 +129,7 @@ async function main() {
   for (const r of rows) {
     const isbn13 = r.isbn ? isbnUtil.to13(r.isbn) : null;
     if (isbn13) {
-      const dup = db.prepare('SELECT id FROM books WHERE isbn13 = ?').get(isbn13);
+      const dup = db.prepare('SELECT id FROM books WHERE family_id = ? AND isbn13 = ?').get(FAMILY, isbn13);
       if (dup) {
         skipped++;
         continue;
@@ -113,11 +139,12 @@ async function main() {
     const info = db
       .prepare(
         `INSERT INTO books
-          (isbn13, isbn10, title, author, publisher, pub_date, pages, list_price,
+          (family_id, isbn13, isbn10, title, author, publisher, pub_date, pages, list_price,
            summary, carrier, cover_url, source, source_url, ext_rating, ext_rating_count, owned)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`
       )
       .run(
+        FAMILY,
         isbn13,
         isbn13 ? isbnUtil.to10(isbn13) : null,
         r.title || '(无题)',

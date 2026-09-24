@@ -1,7 +1,7 @@
-/** 手机端的「我的」聚合页：统计、笔记、成员、设置入口 */
+/** 手机端的「我的」聚合页：账号、统计、笔记、成员、设置入口 */
 import { h } from '../ui.js';
 import api from '../api.js';
-import { store, go } from '../app.js';
+import { store, go, logout } from '../app.js';
 
 export default async function more(root) {
   const stats = await api.stats().catch(() => null);
@@ -9,15 +9,30 @@ export default async function more(root) {
   root.append(
     h('div', { class: 'page-head' },
       h('div', {},
-        h('div', { class: 'page-title' }, store.settings.library_name || '我们家的图书馆'),
+        h('div', { class: 'page-title' }, (store.me && store.me.family.name) || '家庭图书馆'),
         h('div', { class: 'page-sub' }, stats ? `藏书 ${stats.overview.books} 本 · 累计花费 ¥${Math.round(stats.overview.spend_total)}` : '')
       )
     ),
 
+    store.me
+      ? h('div', { class: 'section' },
+          h('div', { class: 'card pad' },
+            h('div', { class: 'setting-row' },
+              h('span', { style: { fontSize: '22px' } }, '👤'),
+              h('div', { style: { flex: '1', minWidth: '0' } },
+                h('div', { style: { fontWeight: '600' } }, store.me.user.name),
+                h('div', { class: 'desc ellip' }, store.me.user.email)
+              ),
+              h('button', { class: 'btn sm danger', onclick: logout }, '退出')
+            )
+          )
+        )
+      : null,
+
     h('div', { class: 'section' },
       h('div', { class: 'section-title' }, '家庭成员'),
       h('div', { class: 'card pad' },
-        store.members.map((m) =>
+        store.members.filter((m) => m.active).map((m) =>
           h('div', {
             class: 'setting-row', style: { cursor: 'pointer' },
             onclick: () => go(`/?member=${m.id}`),
@@ -38,7 +53,7 @@ export default async function more(root) {
         entry('📊', '统计', '买书花费、阅读排行', '/stats'),
         entry('✍️', '读书笔记', '划线和想法', '/notes'),
         entry('📚', '书架', '全部藏书', '/'),
-        entry('⚙️', '设置', '成员、代理、书目来源', '/settings')
+        entry('⚙️', '设置', '账号、家庭、邀请家人', '/settings')
       )
     ),
 
