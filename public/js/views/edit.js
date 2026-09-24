@@ -146,11 +146,11 @@ export default async function edit(root, { params, query }) {
       preview,
       h('div', { style: { flex: '1', minWidth: '0' } }, f.node)
     ),
-    editing ? null : h('div', { class: 'section' },
+    editing ? '' : h('div', { class: 'section' },
       h('div', { class: 'section-title' }, '购买信息', h('span', { class: 'count' }, '不填也行，之后能补')),
       h('div', { class: 'card pad' }, pf.node)
     ),
-    editing ? null : h('div', { class: 'section' },
+    editing ? '' : h('div', { class: 'section' },
       h('div', { class: 'section-title' }, '谁要读'),
       h('div', { class: 'card pad' }, readingRow)
     ),

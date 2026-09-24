@@ -159,7 +159,7 @@ function renderMemberChips() {
       ? h('div', { class: 'row', style: { width: '100%', marginBottom: '10px', gap: '6px', flexWrap: 'nowrap' } },
           h('a', { href: '#/settings', class: 'small ellip', style: { flex: '1', color: 'var(--text-dim)' }, title: store.me.user.email }, `👤 ${store.me.user.name}`),
           h('button', { class: 'btn ghost sm', onclick: logout }, '退出'))
-      : null,
+      : '', // append(null) 会显示成 "null"
     h('div', { class: 'tiny faint', style: { width: '100%', marginBottom: '4px' } }, '家庭成员'),
     ...store.members.filter((m) => m.active).map((m) =>
       h('button', {

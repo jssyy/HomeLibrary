@@ -54,7 +54,7 @@ function formBox(children, onSubmit) {
 
 function show(...nodes) {
   card.innerHTML = '';
-  card.append(...nodes);
+  card.append(...nodes.filter(Boolean)); // 可选区块不显示时是 null，append(null) 会显示成 "null"
   const first = card.querySelector('input');
   if (first && matchMedia('(min-width: 821px)').matches) first.focus();
 }
