@@ -27,7 +27,7 @@ export default async function more(root) {
             )
           )
         )
-      : null,
+      : '', // append(null) 会显示成 "null"
 
     h('div', { class: 'section' },
       h('div', { class: 'section-title' }, '家庭成员'),
