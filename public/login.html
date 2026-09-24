@@ -2,37 +2,25 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>家庭图书馆</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f7f3ec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15130f" media="(prefers-color-scheme: dark)">
+<title>家庭图书馆 · 登录</title>
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/icon-180.png">
 <link rel="stylesheet" href="/css/app.css">
 </head>
-<body style="display:grid;place-items:center;min-height:100vh">
-  <div class="card pad" style="width:min(340px,88vw);text-align:center">
-    <div style="font-size:38px">📚</div>
-    <h2 style="margin:10px 0 4px">家庭图书馆</h2>
-    <p class="small muted" style="margin:0 0 16px">请输入家庭口令</p>
-    <input id="pin" type="password" inputmode="numeric" placeholder="口令"
-           style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg-soft);text-align:center;font-size:17px">
-    <div id="msg" class="small" style="color:#c0392b;min-height:20px;margin-top:8px"></div>
-    <button class="btn primary block" id="go">进入</button>
-  </div>
-<script>
-  const pin = document.getElementById('pin');
-  const msg = document.getElementById('msg');
-  async function submit() {
-    msg.textContent = '';
-    const r = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: pin.value }),
-    });
-    if (r.ok) location.href = '/';
-    else msg.textContent = '口令不对';
-  }
-  document.getElementById('go').addEventListener('click', submit);
-  pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  pin.focus();
-</script>
+<body class="auth-body">
+  <main class="auth-shell">
+    <div class="auth-brand">
+      <div class="auth-logo">📚</div>
+      <h1>家庭图书馆</h1>
+      <p class="muted small">全家共用一个书库，各自记录读到哪儿</p>
+    </div>
+    <div class="card auth-card" id="authCard"></div>
+  </main>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/js/auth.js"></script>
 </body>
 </html>

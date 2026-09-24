@@ -94,14 +94,14 @@ export default async function edit(root, { params, query }) {
       { name: 'price', label: '实付金额', type: 'number', step: '0.01' },
       { name: 'channel', label: '渠道', type: 'select', options: ['', ...channels] },
     ] },
-    { name: 'buyer_id', label: '购买人', type: 'select', value: store.currentMember || '',
-      options: [{ value: '', label: '未指定' }, ...store.members.map((m) => ({ value: m.id, label: `${m.emoji} ${m.name}` }))] },
+    { name: 'buyer_id', label: '购买人', type: 'select', value: store.actingMember() || '',
+      options: [{ value: '', label: '未指定' }, ...store.members.filter((m) => m.active).map((m) => ({ value: m.id, label: `${m.emoji} ${m.name}` }))] },
   ]);
 
   // 阅读状态（新增时可直接设）
   const readingSelects = new Map();
   const readingRow = h('div', { class: 'row' },
-    store.members.map((m) => {
+    store.members.filter((m) => m.active).map((m) => {
       const sel = h('select', { class: 'btn sm' }, STATUS_LIST.map((s) => h('option', { value: s }, s)));
       readingSelects.set(m.id, sel);
       return h('label', { class: 'row', style: { gap: '6px' } }, h('span', {}, `${m.emoji} ${m.name}`), sel);

@@ -1,0 +1,37 @@
+# Render 一键部署：Dashboard → New → Blueprint → 选这个仓库
+# 免费套餐没有持久化磁盘，重启 / 重新部署后数据会清空，适合试用演示。
+# 长期使用请把 plan 改成 starter 并取消下面 disk 的注释。
+services:
+  - type: web
+    name: home-library
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: HL_HTTPS
+        value: "false"            # Render 自带 https
+      - key: HL_TRUST_PROXY
+        value: "1"
+      - key: HL_DATA_DIR
+        value: /data
+      - key: HL_ZLIB_ENABLED
+        value: "false"            # 公开站点默认关闭 Z-Library 来源
+      - key: HL_ALLOW_REGISTER
+        value: "true"             # 只想让熟人试用就改成 false，凭邀请链接注册
+      # 发信（找回密码、验证邮箱）。在 Render 控制台里填，不要写进仓库
+      - key: HL_SMTP_HOST
+        sync: false
+      - key: HL_SMTP_PORT
+        sync: false
+      - key: HL_SMTP_USER
+        sync: false
+      - key: HL_SMTP_PASS
+        sync: false
+      - key: HL_MAIL_FROM
+        sync: false
+      - key: HL_ADMIN_EMAILS
+        sync: false
+    # disk:
+    #   name: data
+    #   mountPath: /data
+    #   sizeGB: 1

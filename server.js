@@ -7,11 +7,12 @@ process.removeAllListeners('warning'); // node:sqlite 的实验性警告，眼�
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 const config = require('./src/config');
 const { lanAddresses, preferredAddresses } = require('./src/net');
 require('./src/db'); // 建表 / 迁移
+const auth = require('./src/auth');
+const mailer = require('./src/services/mailer');
 
 const app = express();
 
@@ -19,31 +20,24 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ------------------------------------------------------------------ 可选口令
+// ------------------------------------------------------------------ 登录
 
-function sign(v) {
-  return crypto.createHmac('sha256', config.SECRET).update(String(v)).digest('hex').slice(0, 32);
-}
+// 放在 nginx / Caddy 后面时打开，才能拿到真实 IP（限流用）和 https 状态（Cookie 的 Secure）
+if (config.TRUST_PROXY) app.set('trust proxy', config.TRUST_PROXY);
 
-if (config.PIN) {
-  const token = sign(config.PIN);
-  app.use((req, res, next) => {
-    if (req.path === '/api/login' || req.path === '/login.html' || /^\/(css|js|vendor|icons)\//.test(req.path)) {
-      return next();
-    }
-    const cookie = /hl_auth=([a-f0-9]+)/.exec(req.headers.cookie || '');
-    if (cookie && cookie[1] === token) return next();
-    if (req.path.startsWith('/api/')) return res.status(401).json({ error: '需要口令' });
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
-  });
-  app.post('/api/login', (req, res) => {
-    if (String((req.body || {}).pin) !== String(config.PIN)) {
-      return res.status(403).json({ error: '口令不对' });
-    }
-    res.setHeader('Set-Cookie', `hl_auth=${token}; Path=/; Max-Age=31536000; SameSite=Lax`);
-    res.json({ ok: true });
-  });
-}
+app.use(auth.loadUser);
+
+// 不登录也能访问的：登录页本身、前端静态资源、账号接口
+const PUBLIC = /^\/(login\.html|sw\.js|manifest\.webmanifest|favicon\.ico)$|^\/(css|js|vendor|icons)\/|^\/api\/(auth\/|health$)/;
+
+app.use((req, res, next) => {
+  if (req.user || PUBLIC.test(req.path)) return next();
+  if (req.path.startsWith('/api/') || req.path.startsWith('/covers/')) {
+    return res.status(401).json({ error: '请先登录', code: 'AUTH_REQUIRED' });
+  }
+  const back = req.path.startsWith('/read/') ? `?next=${encodeURIComponent(req.originalUrl)}` : '';
+  res.redirect(`/login.html${back}`);
+});
 
 // ------------------------------------------------------------------ 静态资源
 
@@ -54,13 +48,18 @@ app.use('/covers', express.static(config.COVERS_DIR, { maxAge: '30d' }));
 
 // ------------------------------------------------------------------ API
 
+app.use('/api', require('./src/routes/auth'));
+app.use('/api', require('./src/routes/family'));
+app.get('/api/health', (req, res) => res.json({ ok: true, version: require('./package.json').version }));
+
+// 以下接口都是家庭书库里的数据，必须先加入家庭
+app.use('/api', auth.requireFamily);
 app.use('/api', require('./src/routes/books'));
 app.use('/api', require('./src/routes/reading'));
 app.use('/api', require('./src/routes/files'));
 app.use('/api', require('./src/routes/meta'));
 app.use('/api', require('./src/routes/ocr'));
-
-app.get('/api/health', (req, res) => res.json({ ok: true, version: require('./package.json').version }));
+app.use('/api', (req, res) => res.status(404).json({ error: '没有这个接口' }));
 
 // ------------------------------------------------------------------ 页面
 
@@ -142,6 +141,15 @@ function start() {
     if (config.HTTPS) {
       lines.push('  证书是自签名的，手机首次打开会提示"不安全"，选「继续访问」即可。');
       lines.push('  摄像头扫码必须在 https 或 localhost 下才能用，所以默认开了 https。');
+      lines.push('');
+    }
+
+    if (!mailer.isConfigured()) {
+      lines.push('  没配 SMTP：找回密码、验证邮箱的邮件会打印在这个窗口里，复制链接打开即可。');
+      lines.push('');
+    } else if (!config.PUBLIC_URL) {
+      lines.push('  ⚠️ 配了 SMTP 但没配 HL_PUBLIC_URL：邮件里的链接会用访问者请求里的域名，');
+      lines.push('     对公网开放时请务必设置 HL_PUBLIC_URL，防止重置链接被伪造域名劫持。');
       lines.push('');
     }
 

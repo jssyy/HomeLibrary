@@ -5,6 +5,7 @@ const meta = require('../services/metadata');
 const zlibrary = require('../services/zlibrary');
 const { wrap, pick, str, num, int, today, BOOK_FIELDS, clean, setClause } = require('../util');
 const isbnUtil = require('../services/isbn');
+const { bookOf, memberIdOrNull, childOf, notFound } = require('../scope');
 
 const router = express.Router();
 
@@ -74,8 +75,8 @@ router.get(
   '/books',
   wrap((req, res) => {
     const q = str(req.query.q);
-    const where = [];
-    const args = [];
+    const where = ['b.family_id = ?'];
+    const args = [req.familyId];
 
     if (q) {
       where.push(
@@ -118,7 +119,7 @@ router.get(
     }
     if (str(req.query.ebook) === '1') where.push('EXISTS (SELECT 1 FROM files f WHERE f.book_id = b.id)');
 
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = `WHERE ${where.join(' AND ')}`;
     const order = LIST_SORTS[str(req.query.sort) || 'new'] || LIST_SORTS.new;
     const size = Math.min(Math.max(int(req.query.size, 24), 1), 200);
     const page = Math.max(int(req.query.page, 1), 1);
@@ -136,20 +137,21 @@ router.get(
 router.get(
   '/books/facets',
   wrap((req, res) => {
-    const rows = (sql) => db.prepare(sql).all();
+    const fid = req.familyId;
+    const rows = (sql) => db.prepare(sql).all(fid);
     res.json({
       carriers: rows(
-        "SELECT carrier AS value, COUNT(*) AS count FROM books WHERE archived=0 AND owned=1 AND carrier IS NOT NULL GROUP BY carrier ORDER BY count DESC"
+        "SELECT carrier AS value, COUNT(*) AS count FROM books WHERE family_id=? AND archived=0 AND owned=1 AND carrier IS NOT NULL GROUP BY carrier ORDER BY count DESC"
       ),
       categories: rows(
-        "SELECT category AS value, COUNT(*) AS count FROM books WHERE archived=0 AND owned=1 AND category<>'' AND category IS NOT NULL GROUP BY category ORDER BY count DESC LIMIT 40"
+        "SELECT category AS value, COUNT(*) AS count FROM books WHERE family_id=? AND archived=0 AND owned=1 AND category<>'' AND category IS NOT NULL GROUP BY category ORDER BY count DESC LIMIT 40"
       ),
       locations: rows(
-        "SELECT location AS value, COUNT(*) AS count FROM books WHERE archived=0 AND owned=1 AND location<>'' AND location IS NOT NULL GROUP BY location ORDER BY count DESC LIMIT 40"
+        "SELECT location AS value, COUNT(*) AS count FROM books WHERE family_id=? AND archived=0 AND owned=1 AND location<>'' AND location IS NOT NULL GROUP BY location ORDER BY count DESC LIMIT 40"
       ),
       tags: (() => {
         const counter = new Map();
-        for (const r of db.prepare("SELECT tags FROM books WHERE tags IS NOT NULL AND tags<>''").all()) {
+        for (const r of db.prepare("SELECT tags FROM books WHERE family_id=? AND tags IS NOT NULL AND tags<>''").all(fid)) {
           for (const t of String(r.tags).split(/[,，]/).map((s) => s.trim()).filter(Boolean)) {
             counter.set(t, (counter.get(t) || 0) + 1);
           }
@@ -168,7 +170,9 @@ router.get(
   '/books/by-isbn/:isbn',
   wrap((req, res) => {
     const isbn = isbnUtil.to13(req.params.isbn) || req.params.isbn;
-    const items = db.prepare('SELECT * FROM books WHERE isbn13 = ? ORDER BY volume, id').all(isbn);
+    const items = db
+      .prepare('SELECT * FROM books WHERE family_id = ? AND isbn13 = ? ORDER BY volume, id')
+      .all(req.familyId, isbn);
     res.json({ isbn, items: attachRelations(items) });
   })
 );
@@ -177,8 +181,8 @@ router.get(
 router.get(
   '/books/:id',
   wrap((req, res) => {
-    const book = db.prepare('SELECT * FROM books WHERE id = ?').get(int(req.params.id));
-    if (!book) return res.status(404).json({ error: '书不存在' });
+    const book = bookOf(req.familyId, req.params.id);
+    if (!book) return notFound(res);
     ensureReadings(book.id);
     attachRelations([book]);
     book.notes = db
@@ -200,9 +204,9 @@ router.get(
       ? db
           .prepare(
             `SELECT id, title, volume, series, cover_path, cover_url FROM books
-              WHERE isbn13 = ? AND id <> ? ORDER BY volume, id`
+              WHERE family_id = ? AND isbn13 = ? AND id <> ? ORDER BY volume, id`
           )
-          .all(book.isbn13, book.id)
+          .all(req.familyId, book.isbn13, book.id)
       : [];
     book.external_links = zlibrary.links(book);
     res.json(book);
@@ -247,7 +251,9 @@ router.post(
     // 查重：同 ISBN 未必是同一本书——套装书整套共用一个 ISBN，每册书名不同。
     // 所以这里只是提醒，把已有的同 ISBN 书都返回给前端，由用户决定是打开旧的还是当新分册录入。
     if (data.isbn13 && !body.force) {
-      const dups = db.prepare('SELECT * FROM books WHERE isbn13 = ? ORDER BY id').all(data.isbn13);
+      const dups = db
+        .prepare('SELECT * FROM books WHERE family_id = ? AND isbn13 = ? ORDER BY id')
+        .all(req.familyId, data.isbn13);
       if (dups.length) {
         attachRelations(dups);
         const sameTitle = dups.find((d) => d.title === data.title);
@@ -267,6 +273,7 @@ router.post(
       data.cover_path = await meta.cacheCover(data.cover_url, data.isbn13 || data.title);
     }
 
+    data.family_id = req.familyId;
     const result = tx(() => {
       const keys = Object.keys(data);
       const info = db
@@ -289,7 +296,7 @@ router.post(
           str(p.channel),
           num(p.price),
           int(p.quantity, 1),
-          int(p.buyer_id),
+          memberIdOrNull(req.familyId, p.buyer_id),
           str(p.note)
         );
       }
@@ -315,9 +322,9 @@ router.post(
 router.put(
   '/books/:id',
   wrap(async (req, res) => {
-    const id = int(req.params.id);
-    const exists = db.prepare('SELECT id, cover_path FROM books WHERE id = ?').get(id);
-    if (!exists) return res.status(404).json({ error: '书不存在' });
+    const exists = bookOf(req.familyId, req.params.id);
+    if (!exists) return notFound(res);
+    const id = exists.id;
 
     const data = normalizeBookInput(req.body || {});
     if (data.cover_url && data.cover_url !== req.body.__old_cover_url && !data.cover_path) {
@@ -340,8 +347,7 @@ router.put(
 router.delete(
   '/books/:id',
   wrap((req, res) => {
-    const id = int(req.params.id);
-    const info = db.prepare('DELETE FROM books WHERE id = ?').run(id);
+    const info = db.prepare('DELETE FROM books WHERE id = ? AND family_id = ?').run(int(req.params.id), req.familyId);
     res.json({ deleted: Number(info.changes) });
   })
 );
@@ -350,9 +356,9 @@ router.delete(
 router.post(
   '/books/:id/refresh',
   wrap(async (req, res) => {
-    const id = int(req.params.id);
-    const book = db.prepare('SELECT * FROM books WHERE id = ?').get(id);
-    if (!book) return res.status(404).json({ error: '书不存在' });
+    const book = bookOf(req.familyId, req.params.id);
+    if (!book) return notFound(res);
+    const id = book.id;
 
     const query = book.isbn13 || `${book.title} ${book.author || ''}`.trim();
     const { results, errors } = await meta.lookup(query);
@@ -382,7 +388,9 @@ router.post(
 router.post(
   '/books/:id/purchases',
   wrap((req, res) => {
-    const bookId = int(req.params.id);
+    const book = bookOf(req.familyId, req.params.id);
+    if (!book) return notFound(res);
+    const bookId = book.id;
     const p = req.body || {};
     const info = db
       .prepare(
@@ -395,7 +403,7 @@ router.post(
         str(p.channel),
         num(p.price),
         int(p.quantity, 1),
-        int(p.buyer_id),
+        memberIdOrNull(req.familyId, p.buyer_id),
         str(p.note)
       );
     res.status(201).json(db.prepare('SELECT * FROM purchases WHERE id = ?').get(Number(info.lastInsertRowid)));
@@ -405,7 +413,9 @@ router.post(
 router.put(
   '/purchases/:id',
   wrap((req, res) => {
-    const id = int(req.params.id);
+    const cur = childOf('purchases', req.familyId, req.params.id);
+    if (!cur) return notFound(res, '购买记录');
+    const id = cur.id;
     const p = req.body || {};
     db.prepare(
       `UPDATE purchases SET purchased_at=?, channel=?, price=?, quantity=?, buyer_id=?, note=? WHERE id=?`
@@ -414,7 +424,7 @@ router.put(
       str(p.channel),
       num(p.price),
       int(p.quantity, 1),
-      int(p.buyer_id),
+      memberIdOrNull(req.familyId, p.buyer_id),
       str(p.note),
       id
     );
@@ -425,7 +435,9 @@ router.put(
 router.delete(
   '/purchases/:id',
   wrap((req, res) => {
-    const info = db.prepare('DELETE FROM purchases WHERE id = ?').run(int(req.params.id));
+    const cur = childOf('purchases', req.familyId, req.params.id);
+    if (!cur) return notFound(res, '购买记录');
+    const info = db.prepare('DELETE FROM purchases WHERE id = ?').run(cur.id);
     res.json({ deleted: Number(info.changes) });
   })
 );
@@ -434,8 +446,8 @@ router.delete(
 router.get(
   '/purchases',
   wrap((req, res) => {
-    const where = [];
-    const args = [];
+    const where = ['b.family_id = ?'];
+    const args = [req.familyId];
     const year = str(req.query.year);
     if (year) {
       where.push("strftime('%Y', p.purchased_at) = ?");
@@ -451,7 +463,7 @@ router.get(
       where.push('p.channel = ?');
       args.push(channel);
     }
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const whereSql = `WHERE ${where.join(' AND ')}`;
     const limit = Math.min(int(req.query.limit, 200), 1000);
     const rows = db
       .prepare(

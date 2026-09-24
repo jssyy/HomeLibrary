@@ -9,7 +9,7 @@ const params = new URLSearchParams(location.search);
 
 const state = {
   file: null,
-  memberId: Number(params.get('member') || localStorage.getItem('hl_member') || 0) || null,
+  memberId: Number(params.get('member') || 0) || null, // 没指定就用当前账号自己的档案，见 boot()
   percent: 0,
   location: null,
   fontScale: Number(localStorage.getItem('rd_font') || 100),
@@ -35,6 +35,7 @@ function toast(msg) {
 
 async function apiGet(url) {
   const r = await fetch(url);
+  if (r.status === 401) location.href = `/login.html?next=${encodeURIComponent(location.pathname + location.search)}`;
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
   return r.json();
 }
@@ -85,6 +86,7 @@ async function boot() {
   applyTheme(state.theme);
 
   try {
+    if (!state.memberId) state.memberId = (await apiGet('/api/auth/me')).member_id;
     state.file = await apiGet(`/api/files/${fileId}`);
   } catch (e) {
     $('#loading').textContent = `打不开：${e.message}`;
@@ -126,7 +128,6 @@ function buildMemberSelect() {
   }
   sel.addEventListener('change', () => {
     state.memberId = Number(sel.value);
-    localStorage.setItem('hl_member', state.memberId);
     const r = state.file.readings.find((x) => x.member_id === state.memberId);
     if (r && r.location) {
       state.location = r.location;

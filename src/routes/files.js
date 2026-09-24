@@ -7,8 +7,16 @@ const multer = require('multer');
 const config = require('../config');
 const { db } = require('../db');
 const { wrap, int, str } = require('../util');
+const { bookOf, childOf, notFound } = require('../scope');
 
 const router = express.Router();
+
+/** 上传前先确认书是本家庭的，免得文件先落了盘 */
+function ownBook(req, res, next) {
+  req.book = bookOf(req.familyId, req.params.id);
+  if (!req.book) return notFound(res);
+  next();
+}
 
 const ALLOWED = { '.epub': 'epub', '.pdf': 'pdf', '.txt': 'txt', '.mobi': 'mobi', '.azw3': 'azw3' };
 
@@ -36,11 +44,10 @@ const upload = multer({
 /** POST /api/books/:id/files —— 上传电子书 */
 router.post(
   '/books/:id/files',
+  ownBook,
   upload.array('files', 10),
   wrap((req, res) => {
-    const bookId = int(req.params.id);
-    const book = db.prepare('SELECT id FROM books WHERE id = ?').get(bookId);
-    if (!book) return res.status(404).json({ error: '书不存在' });
+    const bookId = req.book.id;
 
     const inserted = [];
     for (const f of req.files || []) {
@@ -63,8 +70,8 @@ router.post(
 router.get(
   '/files/:id/raw',
   wrap((req, res) => {
-    const f = db.prepare('SELECT * FROM files WHERE id = ?').get(int(req.params.id));
-    if (!f) return res.status(404).json({ error: '文件不存在' });
+    const f = childOf('files', req.familyId, req.params.id);
+    if (!f) return notFound(res, '文件');
     const abs = path.join(config.FILES_DIR, f.path);
     if (!fs.existsSync(abs)) return res.status(404).json({ error: '文件已丢失' });
     res.setHeader('Accept-Ranges', 'bytes');
@@ -79,8 +86,8 @@ router.get(
 router.get(
   '/files/:id/download',
   wrap((req, res) => {
-    const f = db.prepare('SELECT * FROM files WHERE id = ?').get(int(req.params.id));
-    if (!f) return res.status(404).json({ error: '文件不存在' });
+    const f = childOf('files', req.familyId, req.params.id);
+    if (!f) return notFound(res, '文件');
     res.download(path.join(config.FILES_DIR, f.path), f.name);
   })
 );
@@ -91,9 +98,9 @@ router.get(
     const f = db
       .prepare(
         `SELECT f.*, b.title, b.author, b.id AS book_id FROM files f
-           JOIN books b ON b.id = f.book_id WHERE f.id = ?`
+           JOIN books b ON b.id = f.book_id WHERE f.id = ? AND b.family_id = ?`
       )
-      .get(int(req.params.id));
+      .get(int(req.params.id), req.familyId);
     if (!f) return res.status(404).json({ error: '文件不存在' });
     f.readings = db
       .prepare(
@@ -109,8 +116,8 @@ router.get(
 router.delete(
   '/files/:id',
   wrap((req, res) => {
-    const f = db.prepare('SELECT * FROM files WHERE id = ?').get(int(req.params.id));
-    if (!f) return res.status(404).json({ error: '文件不存在' });
+    const f = childOf('files', req.familyId, req.params.id);
+    if (!f) return notFound(res, '文件');
     try {
       fs.unlinkSync(path.join(config.FILES_DIR, f.path));
     } catch {
@@ -122,24 +129,31 @@ router.delete(
 );
 
 /** 上传自定义封面 */
+const COVER_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
 const coverUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, config.COVERS_DIR),
     filename: (req, file, cb) => {
       const original = Buffer.from(file.originalname, 'latin1').toString('utf8');
-      const ext = path.extname(original).toLowerCase() || '.jpg';
-      cb(null, `up_${Date.now()}_${crypto.randomBytes(3).toString('hex')}${ext}`);
+      const ext = path.extname(original).toLowerCase();
+      cb(null, `up_${Date.now()}_${crypto.randomBytes(3).toString('hex')}${COVER_EXT.includes(ext) ? ext : '.jpg'}`);
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
+  // 封面是静态托管的，只收图片，免得有人传个 html 上来
+  fileFilter: (req, file, cb) => {
+    if (!/^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) return cb(new Error('封面只支持 jpg / png / webp / gif'));
+    cb(null, true);
+  },
 });
 
 router.post(
   '/books/:id/cover',
+  ownBook,
   coverUpload.single('cover'),
   wrap((req, res) => {
     if (!req.file) return res.status(400).json({ error: '没收到图片' });
-    const id = int(req.params.id);
+    const id = req.book.id;
     db.prepare("UPDATE books SET cover_path = ?, updated_at = datetime('now','localtime') WHERE id = ?").run(
       req.file.filename,
       id

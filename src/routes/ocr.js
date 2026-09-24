@@ -6,6 +6,7 @@ const ocr = require('../services/ocr');
 const vision = require('../services/vision');
 const metadata = require('../services/metadata');
 const { wrap } = require('../util');
+const { requireAdmin } = require('../auth');
 
 const router = express.Router();
 
@@ -117,6 +118,7 @@ router.get(
 /** 设置页测试视觉模型连通性 */
 router.get(
   '/ocr/test-vision',
+  requireAdmin,
   wrap(async (req, res) => res.json(await vision.test()))
 );
 

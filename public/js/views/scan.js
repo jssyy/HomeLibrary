@@ -328,7 +328,7 @@ export default async function scan(root) {
       purchase: {
         purchased_at: new Date().toISOString().slice(0, 10),
         price: r.list_price ?? null,
-        buyer_id: store.currentMember || null,
+        buyer_id: store.actingMember(),
       },
     };
     try {
