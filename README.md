@@ -82,7 +82,7 @@ npm start
 | `HL_HTTPS` | true | 是否启用 https（扫码需要） |
 | `HL_PUBLIC_URL` | 空 | 对外访问地址，邮件链接用它拼；对公网开放时必填 |
 | `HL_ALLOW_REGISTER` | true | 是否开放注册，关掉后只能凭邀请链接注册 |
-| `HL_ADMIN_EMAILS` | 空 | 站点管理员邮箱，逗号分隔；不填则第一个注册的是管理员 |
+| `HL_ADMIN_EMAILS` | 空 | 站点管理员邮箱，逗号分隔；填了就只认名单，不填则第一个注册的是管理员 |
 | `HL_SESSION_DAYS` | 30 | 登录有效期（天） |
 | `HL_TRUST_PROXY` | 空 | 反向代理后面部署时设置，如 `1` |
 | `HL_ZLIB_ENABLED` | true | Z-Library 来源的默认开关，公开站点建议 false |
@@ -131,6 +131,8 @@ GitHub 只存代码，跑不了 Node 服务；网站要部署到支持 Node / Do
   长期使用把 `render.yaml` 里的 `plan` 改成 `starter` 并打开 `disk` 配置（约 $7/月）
 - 免费套餐闲置 15 分钟会休眠，下次打开要等几十秒
 - Render 会自动提供对外地址，`HL_PUBLIC_URL` 不用填
+- 务必填 `HL_ADMIN_EMAILS`（你自己的邮箱）：不填的话谁先注册谁就是站点管理员；
+  填了之后只有名单里的邮箱是管理员，已注册的账号重新登录一次即生效
 - 公开站点默认关闭 Z-Library 来源（`HL_ZLIB_ENABLED=false`）
 - 只想让熟人试用：`HL_ALLOW_REGISTER=false`，第一个人注册后发邀请链接给其他人
 
